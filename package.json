@@ -24,6 +24,12 @@
     "@mariozechner/pi-tui": "*",
     "typebox": "*"
   },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-agent-core": { "optional": true },
+    "@mariozechner/pi-coding-agent": { "optional": true },
+    "@mariozechner/pi-tui": { "optional": true },
+    "typebox": { "optional": true }
+  },
   "devDependencies": {
     "typescript": "^5.9.3"
   }

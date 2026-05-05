@@ -1,0 +1,81 @@
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { EVENT_TYPE, STATE_VERSION } from "./constants";
+import type { GoalEvent, GoalState } from "./types";
+
+export function goalIsLive(goal: GoalState | undefined) {
+  return !!goal && goal.status !== "complete" && goal.status !== "cleared";
+}
+
+export function normalizeGoal(goal: GoalState): GoalState {
+  return {
+    ...goal,
+    version: goal.version ?? 1,
+    workTimeSeconds: Math.max(0, Number(goal.workTimeSeconds ?? 0)),
+    turnCount: Math.max(0, Number(goal.turnCount ?? 0)),
+    noProgressCount: Math.max(0, Number(goal.noProgressCount ?? 0)),
+    consecutiveErrors: Math.max(0, Number(goal.consecutiveErrors ?? 0)),
+  };
+}
+
+export function withEventVersion<T extends GoalEvent>(event: T): T {
+  return { version: STATE_VERSION, ...event };
+}
+
+export function applyEvent(goal: GoalState | undefined, rawEvent: GoalEvent): GoalState | undefined {
+  const event = rawEvent;
+  switch (event.kind) {
+    case "set":
+      return normalizeGoal({ ...event.goal, version: event.goal.version ?? event.version ?? STATE_VERSION });
+    case "status":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({
+        ...goal,
+        status: event.status,
+        pauseReason: event.status === "paused" ? event.reason : undefined,
+        awaitingQuestion: event.status === "paused" && event.reason === "need_user_input" ? event.question : undefined,
+        updatedAt: event.at,
+      });
+    case "iteration_queued":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({ ...goal, iteration: Math.max(goal.iteration, event.iteration), updatedAt: event.at });
+    case "iteration_result":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({
+        ...goal,
+        workTimeSeconds: goal.workTimeSeconds + Math.max(0, Math.floor(event.workSeconds ?? 0)),
+        turnCount: goal.turnCount + 1,
+        lastAssistantStopReason: event.stopReason,
+        lastErrorMessage: event.errorMessage,
+        lastTurnHadProgressTool: event.hadProgressTool,
+        lastContinuationHadProgressTool: event.isContinuation ? event.hadProgressTool : goal.lastContinuationHadProgressTool,
+        noProgressCount: event.isContinuation && !event.hadProgressTool ? goal.noProgressCount + 1 : 0,
+        consecutiveErrors: event.stopReason === "error" ? goal.consecutiveErrors + 1 : 0,
+        updatedAt: event.at,
+      });
+    case "complete":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({
+        ...goal,
+        status: "complete",
+        completedAt: event.at,
+        completionAudit: event.audit,
+        completionSummary: event.summary,
+        pauseReason: undefined,
+        awaitingQuestion: undefined,
+        updatedAt: event.at,
+      });
+    case "clear":
+      if (!goal) return undefined;
+      if (event.id && goal.id !== event.id) return goal;
+      return normalizeGoal({ ...goal, status: "cleared", updatedAt: event.at });
+  }
+}
+
+export function reconstruct(ctx: ExtensionContext): GoalState | undefined {
+  let goal: GoalState | undefined;
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (entry.type !== "custom" || entry.customType !== EVENT_TYPE) continue;
+    goal = applyEvent(goal, entry.data as GoalEvent);
+  }
+  return goal && goal.status !== "cleared" ? normalizeGoal(goal) : undefined;
+}

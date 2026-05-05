@@ -1,0 +1,30 @@
+{
+  "name": "@kyoukisu/pi-goal",
+  "version": "0.1.0",
+  "description": "Codex-style persistent /goal loop for Pi",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "goal"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-agent-core": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

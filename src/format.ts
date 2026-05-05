@@ -1,0 +1,39 @@
+import type { GoalState } from "./types";
+
+export function now() {
+  return Date.now();
+}
+
+export function newId() {
+  return `goal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function elapsedSeconds(goal: GoalState) {
+  return Math.max(0, Math.round((Date.now() - goal.startedAt) / 1000));
+}
+
+export function oneLine(text: string, max = 120) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
+}
+
+export function formatDuration(seconds: number | undefined) {
+  const whole = Math.max(0, Math.floor(seconds ?? 0));
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const secs = whole % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m ${String(secs).padStart(2, "0")}s`;
+  return `${secs}s`;
+}
+
+export function statusLabel(goal: GoalState) {
+  if (goal.status === "paused" && goal.pauseReason) return `paused:${goal.pauseReason}`;
+  return goal.status;
+}
+
+export function progressBar(goal: GoalState, width = 14) {
+  const ratio = goal.maxIterations > 0 ? Math.min(1, goal.iteration / goal.maxIterations) : 0;
+  const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}

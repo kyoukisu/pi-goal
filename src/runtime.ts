@@ -57,15 +57,17 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     renderCurrent(ctx);
 
     const tool = availableQuestionTool(pi);
-    pi.sendMessage(
-      {
-        customType: CONTINUATION_TYPE,
-        content: continuationPrompt({ ...goal, iteration: nextIteration - 1 }, tool),
-        display: false,
-        details: { goalId: goal.id, iteration: nextIteration, reason },
-      },
-      { triggerTurn: true, deliverAs: "followUp" },
-    );
+    const message = {
+      customType: CONTINUATION_TYPE,
+      content: continuationPrompt({ ...goal, iteration: nextIteration - 1 }, tool),
+      display: false,
+      details: { goalId: goal.id, iteration: nextIteration, reason },
+    };
+
+    setTimeout(() => {
+      if (cachedGoal?.id !== goal.id || cachedGoal.status !== "active" || cachedGoal.iteration < nextIteration) return;
+      pi.sendMessage(message, { triggerTurn: true });
+    }, 0);
   }
 
   function resetTurnTracking() {
@@ -114,7 +116,7 @@ export function createGoalRuntime(pi: ExtensionAPI) {
       if (!goal || goal.status !== "active") return;
 
       turnStartedAt = now();
-      currentTurnIsContinuation = awaitingContinuation?.goalId === goal.id;
+      currentTurnIsContinuation = awaitingContinuation?.goalId === goal.id || goal.iteration > goal.turnCount;
       renderCurrent(ctx);
 
       return { systemPrompt: event.systemPrompt + activeGoalSystemPrompt(goal, availableQuestionTool(pi)) };

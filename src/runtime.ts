@@ -49,7 +49,7 @@ export function createGoalRuntime(pi: ExtensionAPI) {
   function queueContinuation(ctx: ExtensionContext, goal: GoalState, reason: string) {
     if (continuationQueued) return;
     if (goal.status !== "active") return;
-    const nextIteration = goal.iteration + 1;
+    const nextIteration = goal.iteration > goal.turnCount ? goal.iteration : goal.iteration + 1;
     append({ kind: "iteration_queued", id: goal.id, iteration: nextIteration, at: now() });
     continuationQueued = true;
     awaitingContinuation = { goalId: goal.id, iteration: nextIteration };

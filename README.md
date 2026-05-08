@@ -45,7 +45,8 @@ Controls:
 - stores goal state in the current Pi session branch
 - injects the active goal into future turns
 - queues hidden continuation turns
-- pauses on user input, errors, aborts, limits, or no tool-backed progress
+- retries transient provider errors with exponential backoff
+- pauses on user input, non-retryable errors, aborts, limits, or repeated no-progress turns
 - requires a completion audit before marking done
 
 ## Tools 🔧

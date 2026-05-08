@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { CONTINUATION_TYPE, EVENT_TYPE } from "./constants";
-import { now } from "./format";
+import { formatDuration, now } from "./format";
 import { activeGoalSystemPrompt, continuationPrompt } from "./prompts";
 import { applyEvent, reconstruct, withEventVersion } from "./state";
 import { availableQuestionTool, isProgressTool, isQuestionTool } from "./tools";
@@ -16,6 +16,20 @@ function lastAssistant(messages: AgentMessage[]) {
   return undefined;
 }
 
+const PROVIDER_RETRY_BASE_MS = 5_000;
+const MAX_TIMER_MS = 2_147_483_647;
+const NO_PROGRESS_LIMIT = 2;
+
+function isRetryableProviderError(message?: string) {
+  if (!message) return false;
+  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay|unable to load site|try again later|status\.openai\.com|ray id|cloudflare|vpn/i.test(message);
+}
+
+function providerRetryDelayMs(attempt: number) {
+  const exponent = Math.max(0, Math.min(30, attempt - 1));
+  return Math.min(MAX_TIMER_MS, PROVIDER_RETRY_BASE_MS * 2 ** exponent);
+}
+
 export function createGoalRuntime(pi: ExtensionAPI) {
   let cachedGoal: GoalState | undefined;
   let continuationQueued = false;
@@ -24,6 +38,7 @@ export function createGoalRuntime(pi: ExtensionAPI) {
   let turnStartedAt: number | undefined;
   let currentTurnIsContinuation = false;
   let currentTurnHadProgressTool = false;
+  let turnSequence = 0;
 
   function append(event: GoalEvent) {
     const versioned = withEventVersion(event);
@@ -46,11 +61,18 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     renderCurrent(ctx);
   }
 
-  function queueContinuation(ctx: ExtensionContext, goal: GoalState, reason: string) {
+  function queueContinuation(
+    ctx: ExtensionContext,
+    goal: GoalState,
+    reason: string,
+    options: { delayMs?: number; sameIteration?: boolean; cancelIfTurnStarts?: number } = {},
+  ) {
     if (continuationQueued) return;
     if (goal.status !== "active") return;
-    const nextIteration = goal.iteration > goal.turnCount ? goal.iteration : goal.iteration + 1;
-    append({ kind: "iteration_queued", id: goal.id, iteration: nextIteration, at: now() });
+    const nextIteration = options.sameIteration ? Math.max(1, goal.iteration) : goal.iteration > goal.turnCount ? goal.iteration : goal.iteration + 1;
+    if (goal.iteration < nextIteration) {
+      append({ kind: "iteration_queued", id: goal.id, iteration: nextIteration, at: now() });
+    }
     continuationQueued = true;
     awaitingContinuation = { goalId: goal.id, iteration: nextIteration };
 
@@ -66,8 +88,10 @@ export function createGoalRuntime(pi: ExtensionAPI) {
 
     setTimeout(() => {
       if (cachedGoal?.id !== goal.id || cachedGoal.status !== "active" || cachedGoal.iteration < nextIteration) return;
+      if (options.cancelIfTurnStarts !== undefined && turnSequence !== options.cancelIfTurnStarts) return;
+      if (options.delayMs && !ctx.isIdle()) return;
       pi.sendMessage(message, { triggerTurn: true });
-    }, 0);
+    }, options.delayMs ?? 0);
   }
 
   function resetTurnTracking() {
@@ -115,6 +139,7 @@ export function createGoalRuntime(pi: ExtensionAPI) {
       resetTurnTracking();
       if (!goal || goal.status !== "active") return;
 
+      turnSequence++;
       turnStartedAt = now();
       currentTurnIsContinuation = awaitingContinuation?.goalId === goal.id || goal.iteration > goal.turnCount;
       renderCurrent(ctx);
@@ -209,10 +234,31 @@ export function createGoalRuntime(pi: ExtensionAPI) {
         return;
       }
 
-      if (currentTurnIsContinuation && !currentTurnHadProgressTool) {
-        pause(ctx, goal, "no_progress");
-        ctx.ui.notify("Goal paused: continuation made no tool-backed progress. Run /goal resume to continue.", "warning");
+      if (stopReason === "error") {
+        if (isRetryableProviderError(errorMessage)) {
+          const delayMs = providerRetryDelayMs(goal.consecutiveErrors);
+          const expectedTurnSequence = turnSequence;
+          resetTurnTracking();
+          ctx.ui.notify(`Goal provider error: retrying in ${formatDuration(Math.ceil(delayMs / 1000))}.`, "warning");
+          queueContinuation(ctx, goal, "provider_error_retry", { delayMs, sameIteration: true, cancelIfTurnStarts: expectedTurnSequence });
+          return;
+        }
         resetTurnTracking();
+        pause(ctx, goal, "error");
+        ctx.ui.notify("Goal paused after non-retryable agent error. Run /goal resume to retry.", "error");
+        return;
+      }
+
+      if (currentTurnIsContinuation && !currentTurnHadProgressTool) {
+        if (goal.noProgressCount < NO_PROGRESS_LIMIT) {
+          resetTurnTracking();
+          ctx.ui.notify("Goal continuation made no tool-backed progress; retrying once with stricter instructions.", "warning");
+          queueContinuation(ctx, goal, "no_progress_retry");
+          return;
+        }
+        resetTurnTracking();
+        pause(ctx, goal, "no_progress");
+        ctx.ui.notify("Goal paused: repeated continuations made no tool-backed progress. Run /goal resume to continue.", "warning");
         return;
       }
 
@@ -224,11 +270,6 @@ export function createGoalRuntime(pi: ExtensionAPI) {
       if (stopReason === "aborted") {
         pause(ctx, goal, "abort");
         ctx.ui.notify("Goal paused after abort. Run /goal resume to continue.", "warning");
-        return;
-      }
-      if (stopReason === "error") {
-        pause(ctx, goal, "error");
-        ctx.ui.notify("Goal paused after final agent error. Run /goal resume to retry.", "error");
         return;
       }
       if (goal.iteration >= goal.maxIterations) {

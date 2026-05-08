@@ -108,7 +108,7 @@ export function registerGoalTools(pi: ExtensionAPI, deps: ToolDeps) {
     executionMode: "sequential",
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const goal = deps.refresh(ctx);
-      if (!goal || goal.status !== "active") throw new Error("no active goal to complete");
+      if (!goal || goal.status === "complete" || goal.status === "cleared") throw new Error("no live goal to complete");
       if (params.goalId && params.goalId !== goal.id) throw new Error("goal id mismatch; call get_goal and audit the current goal");
       const audit = params.audit.trim();
       if (audit.length < MIN_AUDIT_CHARS) throw new Error(`audit too short; provide at least ${MIN_AUDIT_CHARS} characters of concrete evidence`);

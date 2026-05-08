@@ -46,6 +46,7 @@ Controls:
 - injects the active goal into future turns
 - queues hidden continuation turns
 - retries transient provider errors with exponential backoff
+- waits through context-overflow compaction/retry instead of pausing
 - pauses on user input, non-retryable errors, aborts, limits, or repeated no-progress turns
 - requires a completion audit before marking done
 

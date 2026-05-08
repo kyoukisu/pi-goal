@@ -25,6 +25,11 @@ function isRetryableProviderError(message?: string) {
   return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay|unable to load site|try again later|status\.openai\.com|ray id|cloudflare|vpn/i.test(message);
 }
 
+function isContextOverflowError(message?: string) {
+  if (!message) return false;
+  return /context.?length.?exceeded|context.?window|input exceeds the context|too many tokens|maximum context/i.test(message);
+}
+
 function providerRetryDelayMs(attempt: number) {
   const exponent = Math.max(0, Math.min(30, attempt - 1));
   return Math.min(MAX_TIMER_MS, PROVIDER_RETRY_BASE_MS * 2 ** exponent);
@@ -235,6 +240,13 @@ export function createGoalRuntime(pi: ExtensionAPI) {
       }
 
       if (stopReason === "error") {
+        if (isContextOverflowError(errorMessage)) {
+          const expectedTurnSequence = turnSequence;
+          resetTurnTracking();
+          ctx.ui.notify("Goal hit context overflow; waiting for Pi compaction/retry.", "warning");
+          queueContinuation(ctx, goal, "context_overflow_retry", { delayMs: 120_000, sameIteration: true, cancelIfTurnStarts: expectedTurnSequence });
+          return;
+        }
         if (isRetryableProviderError(errorMessage)) {
           const delayMs = providerRetryDelayMs(goal.consecutiveErrors);
           const expectedTurnSequence = turnSequence;

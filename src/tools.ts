@@ -29,6 +29,7 @@ type ToolDeps = {
   append: (event: GoalEvent) => void;
   pause: (ctx: ExtensionContext, goal: GoalState, reason: PauseReason, question?: string) => void;
   queueContinuation: (ctx: ExtensionContext, goal: GoalState, reason: string) => void;
+  dispatchPostGoalActions: (ctx: ExtensionContext, goal: GoalState) => void;
   getCachedGoal: () => GoalState | undefined;
   render: (ctx: ExtensionContext) => void;
 };
@@ -113,6 +114,7 @@ export function registerGoalTools(pi: ExtensionAPI, deps: ToolDeps) {
       const audit = params.audit.trim();
       if (audit.length < MIN_AUDIT_CHARS) throw new Error(`audit too short; provide at least ${MIN_AUDIT_CHARS} characters of concrete evidence`);
       deps.append({ kind: "complete", id: goal.id, audit, summary: params.summary?.trim(), at: now() });
+      deps.dispatchPostGoalActions(ctx, deps.getCachedGoal() ?? goal);
       deps.render(ctx);
       return {
         content: [{ type: "text", text: `Goal complete. Audit recorded:\n${audit}` }],

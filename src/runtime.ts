@@ -99,6 +99,30 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     }, options.delayMs ?? 0);
   }
 
+  function dispatchPostGoalActions(ctx: ExtensionContext, goal: GoalState) {
+    const pending = (goal.afterActions ?? []).filter((action) => !action.dispatchedAt);
+    if (pending.length === 0) return;
+    append({ kind: "after_dispatched", id: goal.id, actionIds: pending.map((action) => action.id), at: now() });
+    renderCurrent(ctx);
+
+    const content = [
+      "The active Pi goal has been completed. Now run these post-goal action(s) exactly once:",
+      ...pending.map((action, index) => `${index + 1}. ${action.text}`),
+    ].join("\n");
+
+    setTimeout(() => {
+      pi.sendMessage(
+        {
+          customType: "pi-goal:after",
+          content,
+          display: true,
+          details: { goalId: goal.id, actionIds: pending.map((action) => action.id) },
+        },
+        { triggerTurn: true, deliverAs: "followUp" },
+      );
+    }, 0);
+  }
+
   function resetTurnTracking() {
     turnStartedAt = undefined;
     currentTurnIsContinuation = false;
@@ -306,6 +330,7 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     refresh,
     pause,
     queueContinuation,
+    dispatchPostGoalActions,
     registerLifecycle,
     getCachedGoal: () => cachedGoal,
     render: renderCurrent,

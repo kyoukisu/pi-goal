@@ -9,6 +9,19 @@ export type PauseReason =
   | "need_user_input"
   | "no_progress";
 
+export type GoalAmendment = {
+  id: string;
+  text: string;
+  createdAt: number;
+};
+
+export type GoalAfterAction = {
+  id: string;
+  text: string;
+  createdAt: number;
+  dispatchedAt?: number;
+};
+
 export type GoalState = {
   version?: number;
   id: string;
@@ -33,12 +46,17 @@ export type GoalState = {
   lastContinuationHadProgressTool?: boolean;
   noProgressCount: number;
   consecutiveErrors: number;
+  amendments?: GoalAmendment[];
+  afterActions?: GoalAfterAction[];
 };
 
 export type GoalEvent =
   | { version?: number; kind: "set"; goal: GoalState }
   | { version?: number; kind: "status"; id: string; status: "active" | "paused"; reason?: PauseReason; question?: string; at: number }
   | { version?: number; kind: "iteration_queued"; id: string; iteration: number; at: number }
+  | { version?: number; kind: "amend"; id: string; amendmentId: string; text: string; at: number }
+  | { version?: number; kind: "after"; id: string; actionId: string; text: string; at: number }
+  | { version?: number; kind: "after_dispatched"; id: string; actionIds: string[]; at: number }
   | {
       version?: number;
       kind: "iteration_result";

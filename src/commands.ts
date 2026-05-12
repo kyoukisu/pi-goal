@@ -108,7 +108,7 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
   pi.registerCommand("goal", {
     description: "Set/show/pause/resume/clear a persistent Codex-style goal",
     getArgumentCompletions(prefix) {
-      const cmds = ["pause", "resume", "clear", "status", "list", "stop", "debug"];
+      const cmds = ["add", "after", "pause", "resume", "clear", "status", "list", "stop", "debug"];
       const items = cmds.filter((c) => c.startsWith(prefix)).map((c) => ({ value: c, label: c }));
       return items.length ? items : null;
     },
@@ -125,6 +125,8 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
           `Goal ${statusLabel(goal)} · ${goal.iteration}/${goal.maxIterations}`,
           `Time: work ${formatDuration(goal.workTimeSeconds)} · elapsed ${formatDuration(goalElapsedSeconds(goal))}`,
           goal.objective,
+          goal.amendments?.length ? `Added requirements: ${goal.amendments.length}` : undefined,
+          goal.afterActions?.length ? `Post-goal actions: ${goal.afterActions.length}` : undefined,
           goal.completionAudit ? `Audit: ${goal.completionAudit}` : undefined,
           goal.awaitingQuestion ? `Awaiting user: ${goal.awaitingQuestion}` : undefined,
         ]
@@ -147,6 +149,38 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
           return;
         }
         await showGoalList(ctx, goals);
+        return;
+      }
+
+      if (trimmed.startsWith("add ")) {
+        if (!goal || !goalIsLive(goal)) {
+          ctx.ui.notify("No live goal to amend.", "warning");
+          return;
+        }
+        const text = trimmed.slice(4).trim();
+        if (!text) {
+          ctx.ui.notify("Usage: /goal add <requirement>", "warning");
+          return;
+        }
+        deps.append({ kind: "amend", id: goal.id, amendmentId: newId(), text, at: now() });
+        renderGoal(ctx, deps.getCachedGoal());
+        ctx.ui.notify(`Goal requirement added: ${oneLine(text)}`, "info");
+        return;
+      }
+
+      if (trimmed.startsWith("after ")) {
+        if (!goal || !goalIsLive(goal)) {
+          ctx.ui.notify("No live goal for post-goal action.", "warning");
+          return;
+        }
+        const text = trimmed.slice(6).trim();
+        if (!text) {
+          ctx.ui.notify("Usage: /goal after <post-goal action>", "warning");
+          return;
+        }
+        deps.append({ kind: "after", id: goal.id, actionId: newId(), text, at: now() });
+        renderGoal(ctx, deps.getCachedGoal());
+        ctx.ui.notify(`Post-goal action added: ${oneLine(text)}`, "info");
         return;
       }
 

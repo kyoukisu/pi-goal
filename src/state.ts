@@ -14,6 +14,8 @@ export function normalizeGoal(goal: GoalState): GoalState {
     turnCount: Math.max(0, Number(goal.turnCount ?? 0)),
     noProgressCount: Math.max(0, Number(goal.noProgressCount ?? 0)),
     consecutiveErrors: Math.max(0, Number(goal.consecutiveErrors ?? 0)),
+    amendments: Array.isArray(goal.amendments) ? goal.amendments : [],
+    afterActions: Array.isArray(goal.afterActions) ? goal.afterActions : [],
   };
 }
 
@@ -38,6 +40,29 @@ export function applyEvent(goal: GoalState | undefined, rawEvent: GoalEvent): Go
     case "iteration_queued":
       if (!goal || goal.id !== event.id) return goal;
       return normalizeGoal({ ...goal, iteration: Math.max(goal.iteration, event.iteration), updatedAt: event.at });
+    case "amend":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({
+        ...goal,
+        amendments: [...(goal.amendments ?? []), { id: event.amendmentId, text: event.text, createdAt: event.at }],
+        updatedAt: event.at,
+      });
+    case "after":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({
+        ...goal,
+        afterActions: [...(goal.afterActions ?? []), { id: event.actionId, text: event.text, createdAt: event.at }],
+        updatedAt: event.at,
+      });
+    case "after_dispatched":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({
+        ...goal,
+        afterActions: (goal.afterActions ?? []).map((action) =>
+          event.actionIds.includes(action.id) ? { ...action, dispatchedAt: event.at } : action,
+        ),
+        updatedAt: event.at,
+      });
     case "iteration_result":
       if (!goal || goal.id !== event.id) return goal;
       return normalizeGoal({

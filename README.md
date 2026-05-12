@@ -34,6 +34,8 @@ Controls:
 
 ```text
 /goal status
+/goal add also verify the migration
+/goal after send the final summary to me on Telegram
 /goal pause
 /goal resume
 /goal clear
@@ -43,8 +45,9 @@ Controls:
 ## What it does 🧠
 
 - stores goal state in the current Pi session branch
-- injects the active goal into future turns
+- injects the active goal and `/goal add` requirements into future turns
 - queues hidden continuation turns
+- runs `/goal after` actions only after successful completion
 - retries transient provider errors with exponential backoff
 - waits through context-overflow compaction/retry instead of pausing
 - pauses on user input, non-retryable errors, aborts, limits, or repeated no-progress turns

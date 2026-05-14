@@ -30,6 +30,11 @@ function isContextOverflowError(message?: string) {
   return /context.?length.?exceeded|context.?window|input exceeds the context|too many tokens|maximum context/i.test(message);
 }
 
+function isRecoverableConversationShapeError(message?: string) {
+  if (!message) return false;
+  return /no tool call found for function call output|function_call_output.*without.*tool|tool result.*without.*tool call|orphan.*tool/i.test(message);
+}
+
 function providerRetryDelayMs(attempt: number) {
   const exponent = Math.max(0, Math.min(30, attempt - 1));
   return Math.min(MAX_TIMER_MS, PROVIDER_RETRY_BASE_MS * 2 ** exponent);
@@ -269,6 +274,13 @@ export function createGoalRuntime(pi: ExtensionAPI) {
           resetTurnTracking();
           ctx.ui.notify("Goal hit context overflow; waiting for Pi compaction/retry.", "warning");
           queueContinuation(ctx, goal, "context_overflow_retry", { delayMs: 120_000, sameIteration: true, cancelIfTurnStarts: expectedTurnSequence });
+          return;
+        }
+        if (isRecoverableConversationShapeError(errorMessage)) {
+          const expectedTurnSequence = turnSequence;
+          resetTurnTracking();
+          ctx.ui.notify("Goal hit recoverable post-compaction tool-call mismatch; retrying after context settles.", "warning");
+          queueContinuation(ctx, goal, "conversation_shape_retry", { delayMs: 5_000, sameIteration: true, cancelIfTurnStarts: expectedTurnSequence });
           return;
         }
         if (isRetryableProviderError(errorMessage)) {

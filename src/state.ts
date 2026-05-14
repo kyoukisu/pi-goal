@@ -47,6 +47,13 @@ export function applyEvent(goal: GoalState | undefined, rawEvent: GoalEvent): Go
         amendments: [...(goal.amendments ?? []), { id: event.amendmentId, text: event.text, createdAt: event.at }],
         updatedAt: event.at,
       });
+    case "extend":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({
+        ...goal,
+        maxIterations: Math.max(goal.maxIterations, event.maxIterations),
+        updatedAt: event.at,
+      });
     case "after":
       if (!goal || goal.id !== event.id) return goal;
       return normalizeGoal({

@@ -322,7 +322,7 @@ export function createGoalRuntime(pi: ExtensionAPI) {
       }
       if (goal.iteration >= goal.maxIterations) {
         pause(ctx, goal, "max_iterations");
-        ctx.ui.notify(`Goal paused after ${goal.maxIterations} iterations. Run /goal resume to continue.`, "warning");
+        ctx.ui.notify(`Goal paused after ${goal.maxIterations} iterations. Run /goal extend <N> to continue.`, "warning");
         return;
       }
       if (goal.maxMinutes && (Date.now() - goal.startedAt) / 60000 >= goal.maxMinutes) {

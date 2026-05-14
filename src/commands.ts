@@ -106,9 +106,9 @@ type CommandDeps = {
 
 export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
   pi.registerCommand("goal", {
-    description: "Set/show/pause/resume/clear a persistent Codex-style goal",
+    description: "Set/show/extend/pause/resume/clear a persistent Codex-style goal",
     getArgumentCompletions(prefix) {
-      const cmds = ["add", "after", "pause", "resume", "clear", "status", "list", "stop", "debug"];
+      const cmds = ["add", "extend", "after", "pause", "resume", "clear", "status", "list", "stop", "debug"];
       const items = cmds.filter((c) => c.startsWith(prefix)).map((c) => ({ value: c, label: c }));
       return items.length ? items : null;
     },
@@ -168,6 +168,38 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
         return;
       }
 
+      if (trimmed === "extend" || trimmed.startsWith("extend ")) {
+        if (!goal || !goalIsLive(goal)) {
+          ctx.ui.notify("No live goal to extend.", "warning");
+          return;
+        }
+        const value = Number(trimmed.slice(7).trim());
+        if (!Number.isFinite(value) || value <= 0) {
+          ctx.ui.notify("Usage: /goal extend <positive-iteration-count>", "warning");
+          return;
+        }
+        const extra = Math.floor(value);
+        const maxIterations = goal.maxIterations + extra;
+        const shouldResume = goal.status === "paused" && goal.pauseReason === "max_iterations";
+        deps.append({ kind: "extend", id: goal.id, maxIterations, at: now() });
+        goal = deps.getCachedGoal();
+        renderGoal(ctx, goal);
+        if (shouldResume && goal) {
+          if (!ctx.isIdle()) {
+            ctx.ui.notify(`Goal limit extended to ${maxIterations}. Run /goal resume when idle.`, "info");
+            return;
+          }
+          deps.append({ kind: "status", id: goal.id, status: "active", at: now() });
+          goal = deps.getCachedGoal();
+          renderGoal(ctx, goal);
+          ctx.ui.notify(`Goal limit extended to ${maxIterations}; resuming.`, "info");
+          if (goal) deps.queueContinuation(ctx, goal, "extend");
+          return;
+        }
+        ctx.ui.notify(`Goal limit extended to ${maxIterations}.`, "info");
+        return;
+      }
+
       if (trimmed.startsWith("after ")) {
         if (!goal || !goalIsLive(goal)) {
           ctx.ui.notify("No live goal for post-goal action.", "warning");
@@ -201,6 +233,10 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
         }
         if (goal.status === "complete") {
           ctx.ui.notify("Goal is already complete. Use /goal <objective> to start a new one.", "warning");
+          return;
+        }
+        if (goal.status === "paused" && goal.pauseReason === "max_iterations" && goal.iteration >= goal.maxIterations) {
+          ctx.ui.notify(`Goal hit its iteration limit (${goal.maxIterations}). Use /goal extend <N> to continue.`, "warning");
           return;
         }
         deps.append({ kind: "status", id: goal.id, status: "active", at: now() });

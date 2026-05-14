@@ -55,6 +55,7 @@ export type GoalEvent =
   | { version?: number; kind: "status"; id: string; status: "active" | "paused"; reason?: PauseReason; question?: string; at: number }
   | { version?: number; kind: "iteration_queued"; id: string; iteration: number; at: number }
   | { version?: number; kind: "amend"; id: string; amendmentId: string; text: string; at: number }
+  | { version?: number; kind: "extend"; id: string; maxIterations: number; at: number }
   | { version?: number; kind: "after"; id: string; actionId: string; text: string; at: number }
   | { version?: number; kind: "after_dispatched"; id: string; actionIds: string[]; at: number }
   | {

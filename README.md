@@ -35,6 +35,7 @@ Controls:
 ```text
 /goal status
 /goal add also verify the migration
+/goal extend 25
 /goal after send the final summary to me on Telegram
 /goal pause
 /goal resume

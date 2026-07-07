@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerGoalCommand } from "../src/commands";
 import { createGoalRuntime } from "../src/runtime";
 import { registerGoalTools } from "../src/tools";

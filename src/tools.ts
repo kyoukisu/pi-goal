@@ -1,6 +1,9 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { constants as FsConstants } from "node:fs";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 import { Type } from "typebox";
-import { DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_MINUTES, MIN_AUDIT_CHARS, STATE_VERSION } from "./constants";
+import { DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_MINUTES, DEFAULT_TOKEN_BUDGET, MIN_AUDIT_CHARS, STATE_VERSION } from "./constants";
 import { newId, now } from "./format";
 import { goalIsLive } from "./state";
 import type { GoalEvent, GoalState, PauseReason } from "./types";
@@ -22,6 +25,53 @@ export function isQuestionTool(toolName: string) {
 
 export function isProgressTool(toolName: string) {
   return !["get_goal", "goal_need_user_input"].includes(toolName);
+}
+
+function auditLooksIncomplete(audit: string) {
+  return /not complete|not completed|not verified|could not verify|couldn't verify|tests? still fail|failing tests?|remaining work|incomplete|blocked|cannot verify|can't verify/i.test(audit);
+}
+
+function slugify(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "goal";
+}
+
+async function resolveRunLogDir(ctx: ExtensionContext) {
+  const configured = process.env.PI_GOAL_RUN_LOG_DIR;
+  if (configured) {
+    const dir = isAbsolute(configured) ? configured : resolve(ctx.cwd, configured);
+    await mkdir(dir, { recursive: true });
+    return dir;
+  }
+
+  const dir = join(ctx.cwd, "runs", "agentic-loops");
+  try {
+    await access(dir, FsConstants.W_OK);
+    return dir;
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeRunLogIfEnabled(ctx: ExtensionContext, goal: GoalState, audit: string, summary?: string) {
+  const dir = await resolveRunLogDir(ctx);
+  if (!dir) return undefined;
+  const date = new Date().toISOString();
+  const path = join(dir, `${date.slice(0, 10)}-${goal.id}-${slugify(goal.objective)}.md`);
+  const body = [
+    `# ${goal.objective}`,
+    "",
+    `- Goal ID: ${goal.id}`,
+    `- Completed: ${date}`,
+    `- Status: ${goal.status}`,
+    summary ? `- Summary: ${summary}` : undefined,
+    "",
+    "## Audit",
+    "",
+    audit,
+    "",
+  ].filter((line): line is string => line !== undefined).join("\n");
+  await writeFile(path, body, "utf8");
+  return path;
 }
 
 type ToolDeps = {
@@ -62,7 +112,8 @@ export function registerGoalTools(pi: ExtensionAPI, deps: ToolDeps) {
     parameters: Type.Object({
       objective: Type.String({ description: "Concrete objective to pursue" }),
       maxIterations: Type.Optional(Type.Number({ description: "Optional max continuation iterations" })),
-      maxMinutes: Type.Optional(Type.Number({ description: "Optional max elapsed minutes" })),
+      tokenBudget: Type.Optional(Type.Number({ description: "Optional token budget for goal work" })),
+      maxMinutes: Type.Optional(Type.Number({ description: "Deprecated no-op wall-clock budget; use tokenBudget" })),
     }),
     executionMode: "sequential",
     async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -80,6 +131,8 @@ export function registerGoalTools(pi: ExtensionAPI, deps: ToolDeps) {
         iteration: 0,
         maxIterations: Math.max(1, Math.floor(params.maxIterations ?? DEFAULT_MAX_ITERATIONS)),
         maxMinutes: params.maxMinutes ? Math.max(1, Math.floor(params.maxMinutes)) : DEFAULT_MAX_MINUTES,
+        tokenBudget: params.tokenBudget ? Math.max(1, Math.floor(params.tokenBudget)) : DEFAULT_TOKEN_BUDGET,
+        tokensUsed: 0,
         workTimeSeconds: 0,
         turnCount: 0,
         noProgressCount: 0,
@@ -113,12 +166,16 @@ export function registerGoalTools(pi: ExtensionAPI, deps: ToolDeps) {
       if (params.goalId && params.goalId !== goal.id) throw new Error("goal id mismatch; call get_goal and audit the current goal");
       const audit = params.audit.trim();
       if (audit.length < MIN_AUDIT_CHARS) throw new Error(`audit too short; provide at least ${MIN_AUDIT_CHARS} characters of concrete evidence`);
-      deps.append({ kind: "complete", id: goal.id, audit, summary: params.summary?.trim(), at: now() });
-      deps.dispatchPostGoalActions(ctx, deps.getCachedGoal() ?? goal);
+      if (auditLooksIncomplete(audit)) throw new Error("audit says the goal is not fully verified/complete; keep working or pause instead");
+      const summary = params.summary?.trim();
+      deps.append({ kind: "complete", id: goal.id, audit, summary, at: now() });
+      const completedGoal = deps.getCachedGoal() ?? goal;
+      const runLogPath = await writeRunLogIfEnabled(ctx, completedGoal, audit, summary);
+      deps.dispatchPostGoalActions(ctx, completedGoal);
       deps.render(ctx);
       return {
-        content: [{ type: "text", text: `Goal complete. Audit recorded:\n${audit}` }],
-        details: { goal: deps.getCachedGoal(), audit },
+        content: [{ type: "text", text: `Goal complete. Audit recorded:\n${audit}${runLogPath ? `\nRun log: ${runLogPath}` : ""}` }],
+        details: { goal: deps.getCachedGoal(), audit, runLogPath },
       };
     },
   });

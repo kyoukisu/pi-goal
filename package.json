@@ -19,15 +19,15 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@mariozechner/pi-agent-core": "*",
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
-    "@mariozechner/pi-agent-core": { "optional": true },
-    "@mariozechner/pi-coding-agent": { "optional": true },
-    "@mariozechner/pi-tui": { "optional": true },
+    "@earendil-works/pi-agent-core": { "optional": true },
+    "@earendil-works/pi-coding-agent": { "optional": true },
+    "@earendil-works/pi-tui": { "optional": true },
     "typebox": { "optional": true }
   },
   "devDependencies": {

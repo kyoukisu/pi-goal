@@ -4,4 +4,7 @@ export const STATUS_KEY = "pi-goal";
 export const STATE_VERSION = 2;
 export const DEFAULT_MAX_ITERATIONS = 25;
 export const DEFAULT_MAX_MINUTES = undefined as number | undefined;
+export const DEFAULT_TOKEN_BUDGET = undefined as number | undefined;
 export const MIN_AUDIT_CHARS = 40;
+export const PROVIDER_RETRY_DELAYS_MS = [5_000, 15_000, 45_000, 90_000] as const;
+export const CONTINUATION_IDLE_RETRY_MS = 100;

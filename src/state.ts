@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { EVENT_TYPE, STATE_VERSION } from "./constants";
 import type { GoalEvent, GoalState } from "./types";
 
@@ -10,6 +10,7 @@ export function normalizeGoal(goal: GoalState): GoalState {
   return {
     ...goal,
     version: goal.version ?? 1,
+    tokensUsed: Math.max(0, Number(goal.tokensUsed ?? 0)),
     workTimeSeconds: Math.max(0, Number(goal.workTimeSeconds ?? 0)),
     turnCount: Math.max(0, Number(goal.turnCount ?? 0)),
     noProgressCount: Math.max(0, Number(goal.noProgressCount ?? 0)),
@@ -35,6 +36,8 @@ export function applyEvent(goal: GoalState | undefined, rawEvent: GoalEvent): Go
         status: event.status,
         pauseReason: event.status === "paused" ? event.reason : undefined,
         awaitingQuestion: event.status === "paused" && event.reason === "need_user_input" ? event.question : undefined,
+        noProgressCount: event.status === "active" ? 0 : goal.noProgressCount,
+        consecutiveErrors: event.status === "active" ? 0 : goal.consecutiveErrors,
         updatedAt: event.at,
       });
     case "iteration_queued":
@@ -52,6 +55,14 @@ export function applyEvent(goal: GoalState | undefined, rawEvent: GoalEvent): Go
       return normalizeGoal({
         ...goal,
         maxIterations: Math.max(goal.maxIterations, event.maxIterations),
+        updatedAt: event.at,
+      });
+    case "budget":
+      if (!goal || goal.id !== event.id) return goal;
+      return normalizeGoal({
+        ...goal,
+        tokenBudget: event.tokenBudget,
+        pauseReason: goal.status === "paused" && goal.pauseReason === "token_budget" && (event.tokenBudget === undefined || goal.tokensUsed < event.tokenBudget) ? undefined : goal.pauseReason,
         updatedAt: event.at,
       });
     case "after":
@@ -74,6 +85,7 @@ export function applyEvent(goal: GoalState | undefined, rawEvent: GoalEvent): Go
       if (!goal || goal.id !== event.id) return goal;
       return normalizeGoal({
         ...goal,
+        tokensUsed: goal.tokensUsed + Math.max(0, Math.floor(event.tokenUsage ?? 0)),
         workTimeSeconds: goal.workTimeSeconds + Math.max(0, Math.floor(event.workSeconds ?? 0)),
         turnCount: goal.turnCount + 1,
         lastAssistantStopReason: event.stopReason,

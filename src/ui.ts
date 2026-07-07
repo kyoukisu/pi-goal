@@ -1,7 +1,7 @@
-import type { ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth } from "@mariozechner/pi-tui";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { STATUS_KEY } from "./constants";
-import { formatDuration, oneLine, statusLabel } from "./format";
+import { formatDuration, formatTokenBudget, oneLine, statusLabel } from "./format";
 import type { GoalState } from "./types";
 
 type RenderGoalOptions = {
@@ -47,7 +47,7 @@ function renderWidgetLines(goal: GoalState, options: RenderGoalOptions, theme: T
 
   const lines = [title];
   const summary = goal.status === "complete" && goal.completionSummary ? goal.completionSummary : goal.objective;
-  const details: string[] = [activity.join(" · "), oneLine(summary, Math.max(24, width * 2))];
+  const details: string[] = [activity.join(" · "), `🪙 ${formatTokenBudget(goal)}`, oneLine(summary, Math.max(24, width * 2))];
   if (goal.awaitingQuestion) details.push(`❓ ${oneLine(goal.awaitingQuestion, width)}`);
   if (goal.noProgressCount > 0) details.push(`🧊 no-progress ${goal.noProgressCount}`);
   if (goal.status === "active") details.push("▶ auto · /goal pause");

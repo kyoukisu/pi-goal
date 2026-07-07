@@ -27,6 +27,17 @@ export function formatDuration(seconds: number | undefined) {
   return `${secs}s`;
 }
 
+export function formatTokenCount(value: number | undefined) {
+  const whole = Math.max(0, Math.floor(value ?? 0));
+  if (whole < 1_000) return String(whole);
+  if (whole < 1_000_000) return `${Number.isInteger(whole / 1_000) ? whole / 1_000 : (whole / 1_000).toFixed(1)}k`;
+  return `${Number.isInteger(whole / 1_000_000) ? whole / 1_000_000 : (whole / 1_000_000).toFixed(1)}m`;
+}
+
+export function formatTokenBudget(goal: GoalState) {
+  return goal.tokenBudget === undefined ? formatTokenCount(goal.tokensUsed) : `${formatTokenCount(goal.tokensUsed)}/${formatTokenCount(goal.tokenBudget)}`;
+}
+
 export function statusLabel(goal: GoalState) {
   if (goal.status === "paused" && goal.pauseReason) return `paused:${goal.pauseReason}`;
   return goal.status;

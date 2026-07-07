@@ -27,8 +27,10 @@ Then:
 With limits:
 
 ```text
-/goal --max 10 --max-minutes 30 migrate auth tests
+/goal --max 10 --tokens 200k migrate auth tests
 ```
+
+`--max-minutes` is deprecated compatibility metadata; runtime no longer enforces wall-clock budgets because they break across pauses/reloads.
 
 Controls:
 
@@ -36,6 +38,9 @@ Controls:
 /goal status
 /goal add also verify the migration
 /goal extend 25
+/goal budget 300k
+/goal budget +50k
+/goal budget off
 /goal after send the final summary to me on Telegram
 /goal pause
 /goal resume
@@ -49,8 +54,10 @@ Controls:
 - injects the active goal and `/goal add` requirements into future turns
 - queues hidden continuation turns
 - runs `/goal after` actions only after successful completion
-- retries transient provider errors with exponential backoff
-- waits through context-overflow and post-compaction recovery instead of pausing
+- retries transient provider errors with bounded short delays, then pauses
+- waits through context-overflow and post-compaction recovery instead of pausing immediately
+- tracks token usage and pauses on token budget
+- optionally writes completion run logs to `$PI_GOAL_RUN_LOG_DIR` or existing `runs/agentic-loops/`
 - pauses on user input, non-retryable errors, aborts, limits, or repeated no-progress turns
 - requires a completion audit before marking done
 

@@ -1,7 +1,7 @@
-import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
-import { matchesKey, truncateToWidth } from "@mariozechner/pi-tui";
-import { DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_MINUTES, STATE_VERSION } from "./constants";
-import { formatDuration, newId, now, oneLine, statusLabel } from "./format";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
+import { DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_MINUTES, DEFAULT_TOKEN_BUDGET, STATE_VERSION } from "./constants";
+import { formatDuration, formatTokenBudget, formatTokenCount, newId, now, oneLine, statusLabel } from "./format";
 import { applyEvent, goalIsLive } from "./state";
 import type { GoalEvent, GoalState, PauseReason } from "./types";
 import { renderGoal } from "./ui";
@@ -73,9 +73,20 @@ async function showGoalList(ctx: ExtensionContext, goals: GoalState[]) {
   );
 }
 
+function parseTokenBudget(value: string): number | undefined {
+  const match = /^(\d+(?:\.\d+)?)([km])?$/i.exec(value.trim());
+  if (!match) return undefined;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) return undefined;
+  const suffix = match[2]?.toLowerCase();
+  const multiplier = suffix === "m" ? 1_000_000 : suffix === "k" ? 1_000 : 1;
+  return Math.floor(amount * multiplier);
+}
+
 function parseObjectiveArgs(args: string) {
   let maxIterations = DEFAULT_MAX_ITERATIONS;
   let maxMinutes = DEFAULT_MAX_MINUTES;
+  let tokenBudget = DEFAULT_TOKEN_BUDGET;
   const parts = args.trim().split(/\s+/);
   const kept: string[] = [];
   for (let i = 0; i < parts.length; i++) {
@@ -85,14 +96,19 @@ function parseObjectiveArgs(args: string) {
       if (Number.isFinite(value) && value > 0) maxIterations = Math.floor(value);
       continue;
     }
+    if (part === "--tokens" && parts[i + 1]) {
+      tokenBudget = parseTokenBudget(parts[++i]) ?? tokenBudget;
+      continue;
+    }
     if (part === "--max-minutes" && parts[i + 1]) {
+      // Deprecated compatibility: parse and store, but runtime no longer enforces wall-clock budgets.
       const value = Number(parts[++i]);
       if (Number.isFinite(value) && value > 0) maxMinutes = Math.floor(value);
       continue;
     }
     kept.push(part);
   }
-  return { objective: kept.join(" ").trim(), maxIterations, maxMinutes };
+  return { objective: kept.join(" ").trim(), maxIterations, maxMinutes, tokenBudget };
 }
 
 type CommandDeps = {
@@ -108,7 +124,7 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
   pi.registerCommand("goal", {
     description: "Set/show/extend/pause/resume/clear a persistent Codex-style goal",
     getArgumentCompletions(prefix) {
-      const cmds = ["add", "extend", "after", "pause", "resume", "clear", "status", "list", "stop", "debug"];
+      const cmds = ["add", "extend", "budget", "after", "pause", "resume", "clear", "status", "list", "stop", "debug"];
       const items = cmds.filter((c) => c.startsWith(prefix)).map((c) => ({ value: c, label: c }));
       return items.length ? items : null;
     },
@@ -124,6 +140,8 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
         const text = [
           `Goal ${statusLabel(goal)} · ${goal.iteration}/${goal.maxIterations}`,
           `Time: work ${formatDuration(goal.workTimeSeconds)} · elapsed ${formatDuration(goalElapsedSeconds(goal))}`,
+          `Tokens: ${formatTokenBudget(goal)}`,
+          goal.maxMinutes ? `Deprecated wall budget stored but not enforced: ${goal.maxMinutes}m` : undefined,
           goal.objective,
           goal.amendments?.length ? `Added requirements: ${goal.amendments.length}` : undefined,
           goal.afterActions?.length ? `Post-goal actions: ${goal.afterActions.length}` : undefined,
@@ -200,6 +218,40 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
         return;
       }
 
+      if (trimmed === "budget" || trimmed.startsWith("budget ")) {
+        if (!goal || !goalIsLive(goal)) {
+          ctx.ui.notify("No live goal to update budget.", "warning");
+          return;
+        }
+        const raw = trimmed.slice("budget".length).trim();
+        if (!raw) {
+          ctx.ui.notify(`Goal token budget: ${formatTokenBudget(goal)}. Usage: /goal budget <tokens|off|+tokens>`, "info");
+          return;
+        }
+        let tokenBudget: number | undefined;
+        if (raw === "off" || raw === "none" || raw === "clear") {
+          tokenBudget = undefined;
+        } else if (raw.startsWith("+")) {
+          const extra = parseTokenBudget(raw.slice(1));
+          if (!extra) {
+            ctx.ui.notify("Usage: /goal budget <tokens|off|+tokens>, e.g. /goal budget 200k or /goal budget +50k", "warning");
+            return;
+          }
+          tokenBudget = Math.max(goal.tokenBudget ?? goal.tokensUsed, goal.tokensUsed) + extra;
+        } else {
+          tokenBudget = parseTokenBudget(raw);
+          if (!tokenBudget) {
+            ctx.ui.notify("Usage: /goal budget <tokens|off|+tokens>, e.g. /goal budget 200k or /goal budget +50k", "warning");
+            return;
+          }
+        }
+        deps.append({ kind: "budget", id: goal.id, tokenBudget, at: now() });
+        goal = deps.getCachedGoal();
+        renderGoal(ctx, goal);
+        ctx.ui.notify(tokenBudget === undefined ? "Goal token budget disabled." : `Goal token budget set to ${formatTokenCount(tokenBudget)}.`, "info");
+        return;
+      }
+
       if (trimmed.startsWith("after ")) {
         if (!goal || !goalIsLive(goal)) {
           ctx.ui.notify("No live goal for post-goal action.", "warning");
@@ -239,6 +291,10 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
           ctx.ui.notify(`Goal hit its iteration limit (${goal.maxIterations}). Use /goal extend <N> to continue.`, "warning");
           return;
         }
+        if (goal.status === "paused" && goal.pauseReason === "token_budget" && goal.tokenBudget !== undefined && goal.tokensUsed >= goal.tokenBudget) {
+          ctx.ui.notify(`Goal hit its token budget (${formatTokenBudget(goal)}). Use /goal budget +50k, /goal budget <tokens>, or /goal budget off.`, "warning");
+          return;
+        }
         deps.append({ kind: "status", id: goal.id, status: "active", at: now() });
         goal = deps.getCachedGoal();
         renderGoal(ctx, goal);
@@ -265,7 +321,7 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
 
       const parsed = parseObjectiveArgs(trimmed);
       if (!parsed.objective) {
-        ctx.ui.notify("Usage: /goal [--max N] [--max-minutes N] <objective>", "warning");
+        ctx.ui.notify("Usage: /goal [--max N] [--tokens 200k] <objective>", "warning");
         return;
       }
 
@@ -286,6 +342,8 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
         iteration: 0,
         maxIterations: parsed.maxIterations,
         maxMinutes: parsed.maxMinutes,
+        tokenBudget: parsed.tokenBudget,
+        tokensUsed: 0,
         workTimeSeconds: 0,
         turnCount: 0,
         noProgressCount: 0,

@@ -25,7 +25,7 @@ function isNonRetryableProviderError(message?: string) {
 
 function isRetryableProviderError(message?: string) {
   if (!message || isNonRetryableProviderError(message)) return false;
-  return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay|unable to load site|try again later|status\.openai\.com|ray id|cloudflare|vpn/i.test(message);
+  return /overloaded|provider.?returned.?error|codex error|an error occurred while processing your request|can retry your request|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|http2 request did not get a response|timed? out|timeout|terminated|retry delay|unable to load site|try again later|status\.openai\.com|ray id|cloudflare|vpn/i.test(message);
 }
 
 function isContextOverflowError(message?: string) {

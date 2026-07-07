@@ -49,6 +49,7 @@ function renderWidgetLines(goal: GoalState, options: RenderGoalOptions, theme: T
   const summary = goal.status === "complete" && goal.completionSummary ? goal.completionSummary : goal.objective;
   const details: string[] = [activity.join(" · "), `🪙 ${formatTokenBudget(goal)}`, oneLine(summary, Math.max(24, width * 2))];
   if (goal.awaitingQuestion) details.push(`❓ ${oneLine(goal.awaitingQuestion, width)}`);
+  if (goal.lastErrorMessage) details.push(`⚠ ${oneLine(goal.lastErrorMessage, width)}${goal.consecutiveErrors > 0 ? ` · empty errors ${goal.consecutiveErrors}` : ""}`);
   if (goal.noProgressCount > 0) details.push(`🧊 no-progress ${goal.noProgressCount}`);
   if (goal.status === "active") details.push("▶ auto · /goal pause");
   if (goal.status === "paused") details.push("▶ /goal resume · 🗑 /goal clear");

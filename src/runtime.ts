@@ -199,6 +199,7 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     const stopReason = assistant?.stopReason as string | undefined;
     const errorMessage = assistant?.errorMessage as string | undefined;
     const workSeconds = turnStartedAt ? Math.max(0, Math.round((now() - turnStartedAt) / 1000)) : 0;
+    const providerErrorHadProgress = currentTurnHadProgressTool || tokenUsage > 0;
 
     if (goal.status !== "active") {
       if (workSeconds > 0 || tokenUsage > 0) {
@@ -254,16 +255,21 @@ export function createGoalRuntime(pi: ExtensionAPI) {
         return;
       }
       if (isRetryableProviderError(errorMessage)) {
-        if (goal.consecutiveErrors > PROVIDER_RETRY_DELAYS_MS.length) {
+        if (!providerErrorHadProgress && goal.consecutiveErrors > PROVIDER_RETRY_DELAYS_MS.length) {
           resetTurnTracking();
           pause(ctx, goal, "provider_error");
-          ctx.ui.notify(`Goal paused after repeated provider errors (${goal.consecutiveErrors}). Run /goal resume to retry.`, "error");
+          ctx.ui.notify(`Goal paused after repeated empty provider errors (${goal.consecutiveErrors}). Last error: ${errorMessage ?? "unknown"}. Run /goal resume to retry.`, "error");
           return;
         }
-        const delayMs = providerRetryDelayMs(goal.consecutiveErrors);
+        const delayMs = providerRetryDelayMs(providerErrorHadProgress ? 1 : goal.consecutiveErrors);
         const expectedTurnSequence = turnSequence;
         resetTurnTracking();
-        ctx.ui.notify(`Goal provider error: retrying in ${formatDuration(Math.ceil(delayMs / 1000))}.`, "warning");
+        ctx.ui.notify(
+          providerErrorHadProgress
+            ? `Goal provider error after progress; retrying in ${formatDuration(Math.ceil(delayMs / 1000))} without increasing outage counter.`
+            : `Goal provider error: retrying in ${formatDuration(Math.ceil(delayMs / 1000))}.`,
+          "warning",
+        );
         queueContinuation(ctx, goal, "provider_error_retry", { delayMs, sameIteration: true, cancelIfTurnStarts: expectedTurnSequence });
         return;
       }

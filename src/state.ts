@@ -24,6 +24,10 @@ export function withEventVersion<T extends GoalEvent>(event: T): T {
   return { version: STATE_VERSION, ...event };
 }
 
+function isEmptyProviderFailure(event: GoalEvent) {
+  return event.kind === "iteration_result" && event.stopReason === "error" && !event.hadProgressTool && Math.max(0, Math.floor(event.tokenUsage ?? 0)) === 0;
+}
+
 export function applyEvent(goal: GoalState | undefined, rawEvent: GoalEvent): GoalState | undefined {
   const event = rawEvent;
   switch (event.kind) {
@@ -93,7 +97,7 @@ export function applyEvent(goal: GoalState | undefined, rawEvent: GoalEvent): Go
         lastTurnHadProgressTool: event.hadProgressTool,
         lastContinuationHadProgressTool: event.isContinuation ? event.hadProgressTool : goal.lastContinuationHadProgressTool,
         noProgressCount: event.isContinuation && !event.hadProgressTool ? goal.noProgressCount + 1 : 0,
-        consecutiveErrors: event.stopReason === "error" ? goal.consecutiveErrors + 1 : 0,
+        consecutiveErrors: isEmptyProviderFailure(event) ? goal.consecutiveErrors + 1 : 0,
         updatedAt: event.at,
       });
     case "complete":

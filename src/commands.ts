@@ -145,6 +145,7 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
           goal.objective,
           goal.amendments?.length ? `Added requirements: ${goal.amendments.length}` : undefined,
           goal.afterActions?.length ? `Post-goal actions: ${goal.afterActions.length}` : undefined,
+          goal.lastErrorMessage ? `Last error: ${goal.lastErrorMessage}${goal.consecutiveErrors > 0 ? ` (empty provider errors: ${goal.consecutiveErrors})` : ""}` : undefined,
           goal.completionAudit ? `Audit: ${goal.completionAudit}` : undefined,
           goal.awaitingQuestion ? `Awaiting user: ${goal.awaitingQuestion}` : undefined,
         ]

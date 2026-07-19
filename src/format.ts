@@ -35,7 +35,46 @@ export function formatTokenCount(value: number | undefined) {
 }
 
 export function formatTokenBudget(goal: GoalState) {
-  return goal.tokenBudget === undefined ? formatTokenCount(goal.tokensUsed) : `${formatTokenCount(goal.tokensUsed)}/${formatTokenCount(goal.tokenBudget)}`;
+  return goal.tokenBudget === undefined
+    ? `${formatTokenCount(goal.tokensUsed)} · budget off`
+    : `${formatTokenCount(goal.tokensUsed)}/${formatTokenCount(goal.tokenBudget)}`;
+}
+
+export function goalPlanCounts(goal: GoalState) {
+  const plan = (goal.checkpoint?.plan ?? []).filter((item) => item.status !== "superseded");
+  return {
+    completed: plan.filter((item) => item.status === "completed").length,
+    total: plan.length,
+  };
+}
+
+function normalizeEvidenceKey(text: string) {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function goalEvidenceObligations(goal: GoalState) {
+  const seen = new Set<string>();
+  const amendments = (goal.amendments ?? []).map((item) => item.text);
+  return [...goal.spec.requirements, ...goal.spec.constraints, ...goal.spec.successCriteria, ...amendments].filter((item) => {
+    const key = normalizeEvidenceKey(item);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function goalEvidenceCounts(goal: GoalState) {
+  const evidence = goal.checkpoint?.evidence ?? [];
+  const obligations = goalEvidenceObligations(goal);
+  if (obligations.length === 0) {
+    return { met: evidence.filter((item) => item.status === "met").length, total: evidence.length };
+  }
+  return {
+    met: obligations.filter((criterion) =>
+      evidence.some((item) => normalizeEvidenceKey(item.criterion) === normalizeEvidenceKey(criterion) && item.status === "met"),
+    ).length,
+    total: obligations.length,
+  };
 }
 
 export function statusLabel(goal: GoalState) {

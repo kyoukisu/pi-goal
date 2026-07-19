@@ -9,5 +9,5 @@
     "esModuleInterop": true,
     "noEmit": true
   },
-  "include": ["extensions/**/*.ts", "src/**/*.ts"]
+  "include": ["extensions/**/*.ts", "src/**/*.ts", "tests/**/*.ts"]
 }

@@ -1,10 +1,10 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_MINUTES, DEFAULT_TOKEN_BUDGET, STATE_VERSION } from "./constants";
+import { DEFAULT_MAX_ITERATIONS, DEFAULT_MAX_MINUTES, DEFAULT_TOKEN_BUDGET, EVENT_TYPE, STATE_VERSION } from "./constants";
 import { formatDuration, formatTokenBudget, formatTokenCount, newId, now, oneLine, statusLabel } from "./format";
-import { applyEvent, goalIsLive } from "./state";
+import { applyEvent, goalIsLive, legacyGoalSpec } from "./state";
 import type { GoalEvent, GoalState, PauseReason } from "./types";
-import { renderGoal } from "./ui";
+import { renderGoal, showGoalDashboard, type GoalCheckpointHistoryItem } from "./ui";
 
 function goalElapsedSeconds(goal: GoalState) {
   const end = goal.status === "complete" && goal.completedAt ? goal.completedAt : Date.now();
@@ -15,7 +15,7 @@ function collectGoals(ctx: ExtensionContext) {
   const goals: GoalState[] = [];
   let current: GoalState | undefined;
   for (const entry of ctx.sessionManager.getBranch()) {
-    if (entry.type !== "custom" || entry.customType !== "pi-goal:event") continue;
+    if (entry.type !== "custom" || entry.customType !== EVENT_TYPE) continue;
     current = applyEvent(current, entry.data as GoalEvent);
     if (!current) continue;
     const index = goals.findIndex((item) => item.id === current!.id);
@@ -23,6 +23,22 @@ function collectGoals(ctx: ExtensionContext) {
     else goals.push(current);
   }
   return goals.filter((item) => item.status !== "cleared");
+}
+
+function collectCheckpointHistory(ctx: ExtensionContext, goalId: string): GoalCheckpointHistoryItem[] {
+  const history: GoalCheckpointHistoryItem[] = [];
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (entry.type !== "custom" || entry.customType !== EVENT_TYPE) continue;
+    const event = entry.data as GoalEvent;
+    if (event.kind !== "checkpoint" || event.id !== goalId) continue;
+    history.push({
+      sequence: event.checkpoint.sequence,
+      phase: event.checkpoint.phase,
+      summary: event.checkpoint.summary,
+      createdAt: event.checkpoint.createdAt,
+    });
+  }
+  return history;
 }
 
 function goalIcon(goal: GoalState) {
@@ -122,7 +138,7 @@ type CommandDeps = {
 
 export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
   pi.registerCommand("goal", {
-    description: "Set/show/extend/pause/resume/clear a persistent Codex-style goal",
+    description: "Start, inspect, track, pause, or resume a persistent adaptive goal",
     getArgumentCompletions(prefix) {
       const cmds = ["add", "extend", "budget", "after", "pause", "resume", "clear", "status", "list", "stop", "debug"];
       const items = cmds.filter((c) => c.startsWith(prefix)).map((c) => ({ value: c, label: c }));
@@ -137,22 +153,22 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
           ctx.ui.notify("No goal set. Usage: /goal <objective>", "info");
           return;
         }
+        renderGoal(ctx, goal);
+        if (ctx.mode === "tui") {
+          await showGoalDashboard(ctx, goal, collectCheckpointHistory(ctx, goal.id));
+          return;
+        }
         const text = [
-          `Goal ${statusLabel(goal)} · ${goal.iteration}/${goal.maxIterations}`,
+          `Goal ${statusLabel(goal)} · phase ${goal.checkpoint?.phase ?? "orienting"} · checkpoint ${goal.checkpointCount}`,
           `Time: work ${formatDuration(goal.workTimeSeconds)} · elapsed ${formatDuration(goalElapsedSeconds(goal))}`,
           `Tokens: ${formatTokenBudget(goal)}`,
-          goal.maxMinutes ? `Deprecated wall budget stored but not enforced: ${goal.maxMinutes}m` : undefined,
-          goal.objective,
-          goal.amendments?.length ? `Added requirements: ${goal.amendments.length}` : undefined,
-          goal.afterActions?.length ? `Post-goal actions: ${goal.afterActions.length}` : undefined,
-          goal.lastErrorMessage ? `Last error: ${goal.lastErrorMessage}${goal.consecutiveErrors > 0 ? ` (empty provider errors: ${goal.consecutiveErrors})` : ""}` : undefined,
-          goal.completionAudit ? `Audit: ${goal.completionAudit}` : undefined,
+          `Outcome: ${goal.spec.outcome}`,
+          `Now: ${goal.checkpoint?.currentAction ?? "—"}`,
+          `Next: ${goal.checkpoint?.nextAction ?? "orient against current authoritative state"}`,
           goal.awaitingQuestion ? `Awaiting user: ${goal.awaitingQuestion}` : undefined,
-        ]
-          .filter(Boolean)
-          .join("\n");
+          goal.lastErrorMessage ? `Last error: ${goal.lastErrorMessage}` : undefined,
+        ].filter(Boolean).join("\n");
         ctx.ui.notify(text, goal.status === "paused" ? "warning" : "info");
-        renderGoal(ctx, goal);
         return;
       }
 
@@ -336,6 +352,8 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
         version: STATE_VERSION,
         id: newId(),
         objective: parsed.objective,
+        spec: legacyGoalSpec(parsed.objective),
+        checkpointCount: 0,
         status: "active",
         createdAt: t,
         updatedAt: t,
@@ -352,7 +370,7 @@ export function registerGoalCommand(pi: ExtensionAPI, deps: CommandDeps) {
       };
       deps.append({ kind: "set", goal: newGoal });
       renderGoal(ctx, deps.getCachedGoal());
-      ctx.ui.notify(`Goal started: ${oneLine(newGoal.objective)}`, "info");
+      ctx.ui.notify(`Goal started · token budget ${newGoal.tokenBudget === undefined ? "off" : formatTokenCount(newGoal.tokenBudget)}: ${oneLine(newGoal.objective)}`, "info");
       deps.queueContinuation(ctx, newGoal, "slash_command");
     },
   });

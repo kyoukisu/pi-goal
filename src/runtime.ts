@@ -4,7 +4,7 @@ import { CONTINUATION_IDLE_RETRY_MS, CONTINUATION_TYPE, EVENT_TYPE, PROVIDER_RET
 import { formatDuration, formatTokenBudget, now } from "./format";
 import { activeGoalSystemPrompt, continuationPrompt } from "./prompts";
 import { applyEvent, reconstruct, withEventVersion } from "./state";
-import { availableQuestionTool, isProgressTool, isQuestionTool } from "./tools";
+import { availableQuestionTool, isGoalBoundaryTool, isProgressTool, isQuestionTool } from "./tools";
 import type { GoalEvent, GoalState, PauseReason } from "./types";
 import { renderGoal } from "./ui";
 
@@ -69,6 +69,8 @@ export function createGoalRuntime(pi: ExtensionAPI) {
   let turnStartedAt: number | undefined;
   let currentTurnIsContinuation = false;
   let currentTurnHadProgressTool = false;
+  let goalBoundaryTool: string | undefined;
+  let toolsBeforeGoalBoundary = 0;
   let currentRunTokenUsage = 0;
   let finalizedTurnSequence: number | undefined;
   let turnSequence = 0;
@@ -180,6 +182,8 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     turnStartedAt = undefined;
     currentTurnIsContinuation = false;
     currentTurnHadProgressTool = false;
+    goalBoundaryTool = undefined;
+    toolsBeforeGoalBoundary = 0;
     currentRunTokenUsage = 0;
   }
 
@@ -282,13 +286,13 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     if (currentTurnIsContinuation && !currentTurnHadProgressTool) {
       if (goal.noProgressCount < NO_PROGRESS_LIMIT) {
         resetTurnTracking();
-        ctx.ui.notify("Goal continuation made no tool-backed progress; retrying once with stricter instructions.", "warning");
+        ctx.ui.notify("Goal continuation ended without a durable checkpoint; retrying once with stricter instructions.", "warning");
         queueContinuation(ctx, goal, "no_progress_retry");
         return;
       }
       resetTurnTracking();
       pause(ctx, goal, "no_progress");
-      ctx.ui.notify("Goal paused: repeated continuations made no tool-backed progress. Run /goal resume to continue.", "warning");
+      ctx.ui.notify("Goal paused: repeated continuations ended without a durable checkpoint. Run /goal resume to continue.", "warning");
       return;
     }
 
@@ -379,6 +383,23 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     });
 
     pi.on("tool_call", async (event) => {
+      // A sequential goal-boundary tool makes its entire sibling batch sequential.
+      // Once it succeeds, block every later sibling/follow-up tool so no work can
+      // occur after the persisted checkpoint even when Pi cannot terminate a
+      // mixed terminating/non-terminating batch automatically.
+      if (goalBoundaryTool) {
+        return {
+          block: true,
+          reason: `${goalBoundaryTool} already persisted the goal boundary for this run. End the response without more tools; the runtime will start the next continuation from that state.`,
+        };
+      }
+      if (event.toolName === "complete_goal" && toolsBeforeGoalBoundary > 0) {
+        return {
+          block: true,
+          reason: "complete_goal must be the first state-changing/inspection action of a clean continuation after a verifying checkpoint. Save fresh evidence with checkpoint_goal, then complete in the next continuation.",
+        };
+      }
+      if (event.toolName !== "get_goal" && event.toolName !== "complete_goal") toolsBeforeGoalBoundary++;
       if (event.toolName === "create_goal" && !turnStartedAt) {
         turnSequence++;
         finalizedTurnSequence = undefined;
@@ -387,7 +408,6 @@ export function createGoalRuntime(pi: ExtensionAPI) {
         currentRunTokenUsage = 0;
       }
       if (isQuestionTool(event.toolName)) questionToolInFlight = true;
-      if (isProgressTool(event.toolName)) currentTurnHadProgressTool = true;
     });
 
     pi.on("input", async (event, ctx) => {
@@ -409,6 +429,8 @@ export function createGoalRuntime(pi: ExtensionAPI) {
     });
 
     pi.on("tool_result", async (event, ctx) => {
+      if (isGoalBoundaryTool(event.toolName) && !event.isError) goalBoundaryTool = event.toolName;
+      if (isProgressTool(event.toolName) && !event.isError) currentTurnHadProgressTool = true;
       if (!isQuestionTool(event.toolName)) return;
       questionToolInFlight = false;
       const goal = refresh(ctx);
